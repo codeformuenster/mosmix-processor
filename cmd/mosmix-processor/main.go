@@ -9,8 +9,9 @@ import (
 )
 
 func main() {
-	urlToDownload := flag.String("-src", mosmixXML.DefaultMosmixURL, "the url to download")
-	dbPath := flag.String("-d", "data.spatialite", "the url to download")
+	urlToDownload := flag.String("src", mosmixXML.DefaultMosmixURL, "the url to download")
+	dbPath := flag.String("db", "data.spatialite", "the url to download")
+	flag.Parse()
 
 	db, err := mosmixDB.NewMosmixDB(*dbPath)
 	if err != nil {
