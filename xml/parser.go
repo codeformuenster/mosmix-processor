@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	mosmixDB "github.com/codeformuenster/mosmix/db"
+	mosmixDB "github.com/codeformuenster/mosmix-processor/db"
 	getter "github.com/hashicorp/go-getter"
 	"golang.org/x/net/html/charset"
 )
@@ -33,7 +33,7 @@ func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
 		return err
 	}
 
-	metadata := mosmixDB.Metadata{SourceURL: url, ProcessingTime: startDownload, DownloadDuration: time.Now().Sub(startDownload)}
+	metadata := mosmixDB.Metadata{SourceURL: url, ProcessingTime: startDownload.UTC(), DownloadDuration: time.Now().Sub(startDownload)}
 
 	startParsing := time.Now()
 	err = parseDWDKMLFile(tmpFilename, db, &metadata)
@@ -90,10 +90,6 @@ func parseDWDKMLFile(filename string, db *mosmixDB.MosmixDB, metadata *mosmixDB.
 				if err != nil {
 					return err
 				}
-				err = db.InsertMetadata(metadata)
-				if err != nil {
-					return err
-				}
 			}
 		}
 	}
@@ -103,25 +99,22 @@ func parseDWDKMLFile(filename string, db *mosmixDB.MosmixDB, metadata *mosmixDB.
 
 func parseAndPersistPlacemarkElement(se xml.StartElement, xmlDecoder *xml.Decoder, db *mosmixDB.MosmixDB, metadata *mosmixDB.Metadata) error {
 	// var place Placemark
-	var place mosmixDB.ForecastPlace
+	place := mosmixDB.ForecastPlace{}
 	err := xmlDecoder.DecodeElement(&place, &se)
 	if err != nil {
 		return err
 	}
 
 	// iterate through ForecastVariables
-	for _, variable := range place.ForecastVariables {
-		parts := strings.Fields(variable.Value)
-		// fmt.Println(variable.Name)
-		processedForecastVariable := mosmixDB.ProcessedForecastVariable{Name: variable.Name}
-		for i, part := range parts {
+	for ctVariable := range place.ForecastVariables {
+		parts := strings.Fields(place.ForecastVariables[ctVariable].RawValues)
+		for ctTimestep, part := range parts {
 			if part == metadata.DefaultUndefSign {
 				continue
 			}
-			// fmt.Printf("%d %v\n", i, part)
-			processedForecastVariable.Timesteps = append(processedForecastVariable.Timesteps, mosmixDB.ProcessedForecastTimestep{Value: part, Timestep: metadata.ForecastTimeSteps[i]})
+			place.ForecastVariables[ctVariable].Values = append(place.ForecastVariables[ctVariable].Values,
+				mosmixDB.ForecastVariableTimestep{Value: part, Timestep: metadata.ForecastTimeSteps[ctTimestep]})
 		}
-		place.ProcessedForecastVariables = append(place.ProcessedForecastVariables, &processedForecastVariable)
 	}
 
 	err = db.InsertForecast(&place)

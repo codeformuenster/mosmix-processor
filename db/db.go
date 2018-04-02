@@ -1,24 +1,26 @@
 package db
 
 import (
-	"bufio"
+	"database/sql"
 	"os"
 
-	"github.com/tidwall/buntdb"
+	_ "github.com/shaxbee/go-spatialite"
 )
 
 type MosmixDB struct {
-	db *buntdb.DB
+	db *sql.DB
 }
 
 func NewMosmixDB(filename string) (*MosmixDB, error) {
-	db, err := buntdb.Open(filename)
+	os.Remove(filename)
+
+	db, err := sql.Open("spatialite", filename)
 	if err != nil {
 		return &MosmixDB{}, err
 	}
 
 	m := &MosmixDB{db: db}
-	err = m.createIndexes()
+	err = m.createTables()
 	if err != nil {
 		return &MosmixDB{}, err
 	}
@@ -27,31 +29,49 @@ func NewMosmixDB(filename string) (*MosmixDB, error) {
 }
 
 func (m *MosmixDB) Close() error {
-	err := m.db.Shrink()
-	if err != nil {
-		return err
-	}
 	return m.db.Close()
 }
 
-func (m *MosmixDB) PersistToDisk(filename string) error {
-	err := m.db.Shrink()
+func (m *MosmixDB) createTables() error {
+	_, err := m.db.Exec("SELECT InitSpatialMetadata(1, 'WGS84')")
+	if err != nil {
+		return err
+	}
+	sqlStmt := `BEGIN;
+	CREATE TABLE metadata(
+		json TEXT NOT NULL
+	);
+	COMMIT;
+	BEGIN;
+	CREATE TABLE forecast_places(
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL
+	);
+	SELECT AddGeometryColumn('forecast_places', 'the_geom', 4326, 'POINTZ', 'XYZ', 1);
+	SELECT CreateSpatialIndex('forecast_places', 'the_geom');
+	COMMIT;
+	BEGIN;
+	CREATE TABLE forecasts(
+		place_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		timestep TEXT NOT NULL,
+		value REAL NOT NULL
+	);
+	CREATE INDEX idx_forecasts_place_id_name ON forecasts (place_id, name);
+	COMMIT;`
+	_, err = m.db.Exec(sqlStmt)
+	if err != nil {
+		return err
+	}
+	_, err = m.db.Exec("PRAGMA synchronous=OFF;")
 	if err != nil {
 		return err
 	}
 
-	f, err := os.Create(filename)
+	_, err = m.db.Exec("PRAGMA journal_mode=OFF;")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-
-	err = m.db.Save(w)
-	if err != nil {
-		return err
-	}
-	w.Flush()
 
 	return nil
 }

@@ -1,28 +1,42 @@
 package db
 
 import (
-	"math"
+	"encoding/xml"
+	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 )
 
-func extractID(key string) string {
-	return strings.Split(key, ":")[1]
-}
+func (k *KMLPoint) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var kmlPoint string
 
-const rEarth = 63728e2 // m
-// distance calculates the distance between the given points. Coordinate order
-// should be lat,lon
-// code from rosettacode.org
-func distance(p0, p1 []float64) float64 {
-	radianLat0 := p0[0] * math.Pi / 180
-	radianLon0 := p0[1] * math.Pi / 180
-	radianLat1 := p1[0] * math.Pi / 180
-	radianLon1 := p1[1] * math.Pi / 180
+	if err := d.DecodeElement(&kmlPoint, &start); err != nil {
+		return err
+	}
 
-	haversineLat := 0.5 * (1 - math.Cos(radianLat1-radianLat0))
-	haversineLon := 0.5 * (1 - math.Cos(radianLon1-radianLon0))
+	parts := strings.Split(kmlPoint, ",")
+	if len(parts) != 3 {
+		return errors.New("too few coordinate parts")
+	}
 
-	return 2 * rEarth *
-		math.Asin(math.Sqrt(haversineLat+math.Cos(radianLat0)*math.Cos(radianLat1)*
-			haversineLon))
+	var lon, lat, altitude float64
+
+	lon, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		fmt.Printf("Coordinate %v of coordinates %v cannot be parsed as float", parts[0], parts)
+	}
+	lat, err = strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		fmt.Printf("Coordinate %v of coordinates %v cannot be parsed as float", parts[1], parts)
+	}
+
+	altitude, err = strconv.ParseFloat(parts[2], 64)
+	if err != nil {
+		fmt.Printf("Coordinate %v of coordinates %v cannot be parsed as float", parts[2], parts)
+	}
+
+	*k = KMLPoint{lon, lat, altitude}
+
+	return nil
 }

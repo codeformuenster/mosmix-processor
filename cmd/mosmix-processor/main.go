@@ -1,34 +1,27 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 
-	mosmixDB "github.com/codeformuenster/mosmix/db"
-	mosmixXML "github.com/codeformuenster/mosmix/xml"
+	mosmixDB "github.com/codeformuenster/mosmix-processor/db"
+	mosmixXML "github.com/codeformuenster/mosmix-processor/xml"
 )
 
 func main() {
-	// f, err := os.Create("profile")
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
+	urlToDownload := flag.String("-src", mosmixXML.DefaultMosmixURL, "the url to download")
+	dbPath := flag.String("-d", "data.spatialite", "the url to download")
 
-	db, err := mosmixDB.NewMosmixDB(":memory:")
-	// db, err := mosmixDB.NewMosmixDB("data.db")
+	db, err := mosmixDB.NewMosmixDB(*dbPath)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	// err = mosmixXML.DownloadAndParse("file:///home/gerald/go/src/github.com/codeformuenster/mosmix/MOSMIX_S_2018033016_240.kml", db)
-	err = mosmixXML.DownloadAndParse("file:///home/gerald/go/src/github.com/codeformuenster/mosmix/MOSMIX_S_2018033016_240.kml_original", db)
-	// err = mosmixXML.DownloadAndParse(mosmixXML.DefaultMosmixURL, db)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	err = db.PersistToDisk("data.db")
+	defer db.Close()
+
+	fmt.Printf("Processing %v into %v\n", *urlToDownload, *dbPath)
+
+	err = mosmixXML.DownloadAndParse(*urlToDownload, db)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -40,9 +33,4 @@ func main() {
 	}
 	fmt.Println(metadata)
 
-	// err = db.GetForecastsAround("9.39,51.66", 10000)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return
-	// }
 }
