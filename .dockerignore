@@ -1,0 +1,7 @@
+*.kml
+*.kmz
+*.csv
+*.md
+.dockerignore
+Dockerfile
+NOTES
