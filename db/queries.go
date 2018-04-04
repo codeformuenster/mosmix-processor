@@ -1,24 +1,24 @@
 package db
 
 import (
-	"encoding/json"
 	"time"
 )
 
 type Metadata struct {
-	ForecastTimeSteps []string `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ForecastTimeSteps>TimeStep" json:"-"`
-	DefaultUndefSign  string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd FormatCfg>DefaultUndefSign,omitempty" json:"-"`
-	GeneratingProcess string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd GeneratingProcess,omitempty" json:"generatingProcess"`
-	Issuer            string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd Issuer,omitempty" json:"issuer,omitempty"`
-	ProductID         string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ProductID,omitempty" json:"productID,omitempty"`
+	ForecastTimeSteps []string `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ForecastTimeSteps>TimeStep"`
+	DefaultUndefSign  string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd FormatCfg>DefaultUndefSign"`
+	GeneratingProcess string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd GeneratingProcess"`
+	Issuer            string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd Issuer"`
+	ProductID         string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ProductID"`
 	ReferencedModels  []struct {
-		Name          string    `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd name,attr" json:"name"`
-		ReferenceTime time.Time `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd referenceTime,attr" json:"referenceTime"`
-	} `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ReferencedModel>Model" json:"referencedModels"`
-	ProcessingTime   time.Time     `json:"processingTime"`
-	DownloadDuration time.Duration `json:"downloadDuration,string"`
-	ParsingDuration  time.Duration `json:"processingDuration,string"`
-	SourceURL        string        `json:"sourceURL"`
+		Name          string    `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd name,attr"`
+		ReferenceTime time.Time `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd referenceTime,attr"`
+	} `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ReferencedModel>Model"`
+	ProcessingTime     time.Time
+	DownloadDuration   time.Duration
+	ParsingDuration    time.Duration
+	SourceURL          string
+	AvailableVariables []string
 	// IssueTime is empty?!
 	// IssueTime       *time.Time `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd IssueTime,omitempty"`   // ZZmaxLength=0
 }
@@ -45,43 +45,85 @@ type ForecastVariableTimestep struct {
 
 // InsertMetadata creates a JSON document in the database under the metadata key
 func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
-	jsonStr, err := json.Marshal(metadata)
-	if err != nil {
-		return err
-	}
 	tx, err := m.db.Begin()
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare("INSERT INTO metadata(json) values(?)")
+
+	stmt, err := tx.Prepare(`INSERT INTO metadata(
+		source_url,
+		processing_time,
+		download_duration,
+		parsing_duration,
+		parser,
+		dwd_issuer,
+		dwd_product_id,
+		dwd_generating_process
+		) values(?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
-	_, err = stmt.Exec(string(jsonStr))
+
+	_, err = stmt.Exec(
+		metadata.SourceURL,
+		metadata.ProcessingTime,
+		metadata.DownloadDuration,
+		metadata.ParsingDuration,
+		"github.com/codeformuenster/mosmix-processor",
+		metadata.Issuer,
+		metadata.ProductID,
+		metadata.GeneratingProcess,
+	)
 	if err != nil {
 		return err
 	}
+
+	modelsStmt, err := tx.Prepare("INSERT INTO dwd_referenced_models(name, reference_time) values(?, ?)")
+	if err != nil {
+		return err
+	}
+	defer modelsStmt.Close()
+
+	for _, model := range metadata.ReferencedModels {
+		modelsStmt.Exec(model.Name, model.ReferenceTime)
+		if err != nil {
+			return err
+		}
+	}
+
+	timestepsStmt, err := tx.Prepare("INSERT INTO dwd_available_timesteps(timestep) values(?)")
+	if err != nil {
+		return err
+	}
+	defer timestepsStmt.Close()
+
+	for _, timestep := range metadata.ForecastTimeSteps {
+		timestepsStmt.Exec(timestep)
+		if err != nil {
+			return err
+		}
+	}
+
+	variablesStmt, err := tx.Prepare("INSERT INTO dwd_available_forecast_variables(name) values(?)")
+	if err != nil {
+		return err
+	}
+	defer variablesStmt.Close()
+
+	for _, variable := range metadata.AvailableVariables {
+		variablesStmt.Exec(variable)
+		if err != nil {
+			return err
+		}
+	}
+
 	tx.Commit()
 	if err != nil {
 		return err
 	}
+
 	return nil
-}
-
-func (m *MosmixDB) GetMetadata() (string, error) {
-	stmt, err := m.db.Prepare("SELECT json FROM metadata")
-	if err != nil {
-		return "", err
-	}
-	defer stmt.Close()
-	var jsonStr string
-	err = stmt.QueryRow().Scan(&jsonStr)
-	if err != nil {
-		return "", err
-	}
-
-	return jsonStr, nil
 }
 
 func (m *MosmixDB) InsertForecast(forecast *ForecastPlace) error {

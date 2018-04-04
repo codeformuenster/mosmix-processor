@@ -10,7 +10,7 @@ import (
 
 func main() {
 	urlToDownload := flag.String("src", mosmixXML.DefaultMosmixURL, "the url to download")
-	dbPath := flag.String("db", "data.spatialite", "the url to download")
+	dbPath := flag.String("db", "data.spatialite", "spatialite database file name")
 	flag.Parse()
 
 	db, err := mosmixDB.NewMosmixDB(*dbPath)
@@ -27,11 +27,4 @@ func main() {
 		fmt.Println(err)
 		return
 	}
-	metadata, err := db.GetMetadata()
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	fmt.Println(metadata)
-
 }

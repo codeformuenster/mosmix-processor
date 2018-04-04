@@ -38,19 +38,37 @@ func (m *MosmixDB) createTables() error {
 		return err
 	}
 	sqlStmt := `BEGIN;
-	CREATE TABLE metadata(
-		json TEXT NOT NULL
+	CREATE TABLE dwd_referenced_models(
+		name TEXT NOT NULL,
+		reference_time TEXT NOT NULL
 	);
-	COMMIT;
-	BEGIN;
+
+	CREATE TABLE dwd_available_timesteps(
+		timestep TEXT NOT NULL
+	);
+
+	CREATE TABLE dwd_available_forecast_variables(
+		name TEXT NOT NULL
+	);
+
+	CREATE TABLE metadata(
+		source_url TEXT NOT NULL,
+		processing_time TEXT NOT NULL,
+		download_duration REAL NOT NULL,
+		parsing_duration REAL NOT NULL,
+		parser TEXT NOT NULL,
+		dwd_issuer TEXT NOT NULL,
+		dwd_product_id TEXT NOT NULL,
+		dwd_generating_process TEXT NOT NULL
+	);
+
 	CREATE TABLE forecast_places(
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL
 	);
 	SELECT AddGeometryColumn('forecast_places', 'the_geom', 4326, 'POINTZ', 'XYZ', 1);
 	SELECT CreateSpatialIndex('forecast_places', 'the_geom');
-	COMMIT;
-	BEGIN;
+
 	CREATE TABLE forecasts(
 		place_id TEXT NOT NULL,
 		name TEXT NOT NULL,
@@ -58,6 +76,7 @@ func (m *MosmixDB) createTables() error {
 		value REAL NOT NULL
 	);
 	CREATE INDEX idx_forecasts_place_id_name ON forecasts (place_id, name);
+
 	COMMIT;`
 	_, err = m.db.Exec(sqlStmt)
 	if err != nil {

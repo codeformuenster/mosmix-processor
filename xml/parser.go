@@ -33,7 +33,11 @@ func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
 		return err
 	}
 
-	metadata := mosmixDB.Metadata{SourceURL: url, ProcessingTime: startDownload.UTC(), DownloadDuration: time.Now().Sub(startDownload)}
+	metadata := mosmixDB.Metadata{
+		SourceURL:        url,
+		ProcessingTime:   startDownload.UTC(),
+		DownloadDuration: time.Now().Sub(startDownload),
+	}
 
 	startParsing := time.Now()
 	err = parseDWDKMLFile(tmpFilename, db, &metadata)
@@ -97,6 +101,15 @@ func parseDWDKMLFile(filename string, db *mosmixDB.MosmixDB, metadata *mosmixDB.
 	return nil
 }
 
+func contains(arr []string, str string) bool {
+	for _, a := range arr {
+		if a == str {
+			return true
+		}
+	}
+	return false
+}
+
 func parseAndPersistPlacemarkElement(se xml.StartElement, xmlDecoder *xml.Decoder, db *mosmixDB.MosmixDB, metadata *mosmixDB.Metadata) error {
 	// var place Placemark
 	place := mosmixDB.ForecastPlace{}
@@ -106,7 +119,7 @@ func parseAndPersistPlacemarkElement(se xml.StartElement, xmlDecoder *xml.Decode
 	}
 
 	// iterate through ForecastVariables
-	for ctVariable := range place.ForecastVariables {
+	for ctVariable, variable := range place.ForecastVariables {
 		parts := strings.Fields(place.ForecastVariables[ctVariable].RawValues)
 		for ctTimestep, part := range parts {
 			if part == metadata.DefaultUndefSign {
@@ -114,6 +127,9 @@ func parseAndPersistPlacemarkElement(se xml.StartElement, xmlDecoder *xml.Decode
 			}
 			place.ForecastVariables[ctVariable].Values = append(place.ForecastVariables[ctVariable].Values,
 				mosmixDB.ForecastVariableTimestep{Value: part, Timestep: metadata.ForecastTimeSteps[ctTimestep]})
+		}
+		if !contains(metadata.AvailableVariables, variable.Name) {
+			metadata.AvailableVariables = append(metadata.AvailableVariables, variable.Name)
 		}
 	}
 
