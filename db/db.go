@@ -76,6 +76,7 @@ func (m *MosmixDB) createTables() error {
 		value REAL NOT NULL
 	);
 	CREATE INDEX idx_forecasts_place_id_name ON forecasts (place_id, name);
+	CREATE INDEX idx_forecasts_name_timestep_place_id on forecasts(name, timestep, place_id);
 
 	COMMIT;`
 	_, err = m.db.Exec(sqlStmt)
