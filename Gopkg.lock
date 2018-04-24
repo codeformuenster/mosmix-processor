@@ -74,10 +74,13 @@
   revision = "0b12d6b5"
 
 [[projects]]
-  name = "github.com/mattn/go-sqlite3"
-  packages = ["."]
-  revision = "6c771bb9887719704b210e87e934f08be014bdb1"
-  version = "v1.6.0"
+  branch = "master"
+  name = "github.com/lib/pq"
+  packages = [
+    ".",
+    "oid"
+  ]
+  revision = "d34b9ff171c21ad295489235aec8b6626023cd04"
 
 [[projects]]
   branch = "master"
@@ -90,12 +93,6 @@
   name = "github.com/mitchellh/go-testing-interface"
   packages = ["."]
   revision = "a61a99592b77c9ba629d254a693acffaeb4b7e28"
-
-[[projects]]
-  branch = "master"
-  name = "github.com/shaxbee/go-spatialite"
-  packages = ["."]
-  revision = "26164b0637aab878198b03a9b9b2441b31399272"
 
 [[projects]]
   name = "github.com/ulikunitz/xz"
@@ -145,6 +142,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "00c152cc78e68c6ba80ecf804f73d545e9489b1188ac49a5db7899f502b9f2b8"
+  inputs-digest = "402dfdf1a72ebdfae33a5bb43ac5101c31512e00d759843c2f3305be5d90f96a"
   solver-name = "gps-cdcl"
   solver-version = 1

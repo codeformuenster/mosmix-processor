@@ -3,7 +3,10 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type Metadata struct {
@@ -47,12 +50,7 @@ type ForecastVariableTimestep struct {
 
 // InsertMetadata creates a JSON document in the database under the metadata key
 func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
-	tx, err := m.db.Begin()
-	if err != nil {
-		return err
-	}
-
-	stmt, err := tx.Prepare(`INSERT INTO metadata(
+	_, err := m.db.Exec(`INSERT INTO metadata(
 		source_url,
 		processing_time,
 		download_duration,
@@ -61,13 +59,7 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 		dwd_issuer,
 		dwd_product_id,
 		dwd_generating_process
-		) values(?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	_, err = stmt.Exec(
+		) values($1, $2, $3, $4, $5, $6, $7, $8)`,
 		metadata.SourceURL,
 		metadata.ProcessingTime,
 		metadata.DownloadDuration,
@@ -81,56 +73,36 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 		return err
 	}
 
-	modelsStmt, err := tx.Prepare("INSERT INTO dwd_referenced_models(name, reference_time) values(?, ?)")
-	if err != nil {
-		return err
-	}
-	defer modelsStmt.Close()
-
 	for _, model := range metadata.ReferencedModels {
-		modelsStmt.Exec(model.Name, model.ReferenceTime)
+		_, err := m.db.Exec("INSERT INTO dwd_referenced_models(name, reference_time) values($1, $2)", model.Name, model.ReferenceTime)
 		if err != nil {
 			return err
 		}
 	}
-
-	timestepsStmt, err := tx.Prepare("INSERT INTO dwd_available_timesteps(timestep) values(?)")
-	if err != nil {
-		return err
-	}
-	defer timestepsStmt.Close()
 
 	for _, timestep := range metadata.ForecastTimeSteps {
-		timestepsStmt.Exec(timestep)
+		_, err := m.db.Exec("INSERT INTO dwd_available_timesteps(timestep) values($1)", timestep)
 		if err != nil {
 			return err
 		}
 	}
-
-	variablesStmt, err := tx.Prepare("INSERT INTO dwd_available_forecast_variables(name) values(?)")
-	if err != nil {
-		return err
-	}
-	defer variablesStmt.Close()
 
 	var qryBytes bytes.Buffer
 	for i, variable := range metadata.AvailableVariables {
-		variablesStmt.Exec(variable)
+		_, err := m.db.Exec("INSERT INTO dwd_available_forecast_variables (name) VALUES ($1)", variable)
 		if err != nil {
 			return err
 		}
 
 		if i == 0 {
-			fmt.Fprintf(&qryBytes, "CREATE VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value as %s FROM forecasts WHERE name = '%s')", variable, variable)
+			fmt.Fprintf(&qryBytes, "CREATE OR REPLACE VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", variable, variable, variable)
 			continue
 		}
 
-		fmt.Fprintf(&qryBytes, "LEFT JOIN (SELECT place_id, timestep, value as %s FROM forecasts WHERE name = '%s') USING(timestep, place_id)", variable, variable)
+		fmt.Fprintf(&qryBytes, " LEFT JOIN (SELECT place_id, timestep, value as %s FROM forecasts WHERE name = '%s') AS %s USING (timestep, place_id)", variable, variable, variable)
 	}
 
-	_, err = tx.Exec(qryBytes.String())
-
-	tx.Commit()
+	_, err = m.db.Exec(qryBytes.String())
 	if err != nil {
 		return err
 	}
@@ -142,29 +114,32 @@ func (m *MosmixDB) InsertForecast(forecast *ForecastPlace) error {
 	if err != nil {
 		return err
 	}
-	forecastPlaceStatement, err := tx.Prepare("INSERT INTO forecast_places(id, name, the_geom) values(?, ?, MakePointZ(?, ?, ?, 4326))")
+
+	_, err = tx.Exec("INSERT INTO forecast_places (id, name, the_geom) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326));",
+		forecast.ID, forecast.Name, forecast.Geometry.Longitude, forecast.Geometry.Latitude, forecast.Geometry.Altitude)
 	if err != nil {
 		return err
 	}
-	defer forecastPlaceStatement.Close()
-	_, err = forecastPlaceStatement.Exec(forecast.ID, forecast.Name, forecast.Geometry.Longitude, forecast.Geometry.Latitude, forecast.Geometry.Altitude)
+
+	stmt, err := tx.Prepare(pq.CopyIn("forecasts", "place_id", "name", "timestep", "value"))
 	if err != nil {
-		return err
+		log.Fatal(err)
 	}
-	forecastVariableStatement, err := tx.Prepare("INSERT INTO forecasts(place_id, name, timestep, value) values(?, ?, ?, ?)")
-	if err != nil {
-		return err
-	}
-	defer forecastVariableStatement.Close()
+
 	for _, variable := range forecast.ForecastVariables {
 		for _, value := range variable.Values {
-			_, err = forecastVariableStatement.Exec(forecast.ID, variable.Name, value.Timestep, value.Value)
+			_, err := stmt.Exec(forecast.ID, variable.Name, value.Timestep, value.Value)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	tx.Commit()
+	err = stmt.Close()
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit()
 	if err != nil {
 		return err
 	}

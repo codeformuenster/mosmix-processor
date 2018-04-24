@@ -2,24 +2,23 @@ package db
 
 import (
 	"database/sql"
-	"os"
+	"fmt"
+	"time"
 
-	_ "github.com/shaxbee/go-spatialite"
+	_ "github.com/lib/pq"
 )
 
 type MosmixDB struct {
 	db *sql.DB
 }
 
-func NewMosmixDB(filename string) (*MosmixDB, error) {
-	os.Remove(filename)
-
-	db, err := sql.Open("spatialite", filename)
+func NewMosmixDB(connectionString string) (*MosmixDB, error) {
+	db, err := sql.Open("postgres", connectionString)
 	if err != nil {
 		return &MosmixDB{}, err
 	}
 
-	m := &MosmixDB{db: db}
+	m := &MosmixDB{db}
 	err = m.createTables()
 	if err != nil {
 		return &MosmixDB{}, err
@@ -29,31 +28,61 @@ func NewMosmixDB(filename string) (*MosmixDB, error) {
 }
 
 func (m *MosmixDB) Close() error {
-	return m.db.Close()
-}
-
-func (m *MosmixDB) createTables() error {
-	_, err := m.db.Exec("SELECT InitSpatialMetadata(1, 'WGS84')")
+	fmt.Print("Creating Indexes ... ")
+	start := time.Now()
+	err := m.createIndexes()
 	if err != nil {
 		return err
 	}
+	duration := time.Now().Sub(start)
+	fmt.Printf("done in %d ns\n", duration)
+	return m.db.Close()
+}
+
+func (m *MosmixDB) createIndexes() error {
+	var err error
 	sqlStmt := `BEGIN;
-	CREATE TABLE dwd_referenced_models(
+
+	ANALYZE forecast_places;
+	ANALYZE forecasts;
+
+	CREATE INDEX IF NOT EXISTS idx_the_geom_forecast_places ON forecast_places USING GIST (the_geom);
+	CREATE OR REPLACE VIEW places AS SELECT id, name, ST_X(the_geom) AS lng, ST_Y(the_geom) AS lat, ST_Z(the_geom) AS alt, the_geom from forecast_places;
+
+	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_name ON forecasts (place_id, name);
+	CREATE INDEX IF NOT EXISTS idx_forecasts_name_timestep_place_id on forecasts(name, timestep, place_id);
+
+	ALTER TABLE forecast_places SET LOGGED;
+	ALTER TABLE forecasts SET LOGGED;
+
+	COMMIT;`
+	_, err = m.db.Exec(sqlStmt)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (m *MosmixDB) createTables() error {
+	var err error
+	sqlStmt := `BEGIN;
+	CREATE TABLE IF NOT EXISTS dwd_referenced_models(
 		name TEXT NOT NULL,
-		reference_time TEXT NOT NULL
+		reference_time TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 
-	CREATE TABLE dwd_available_timesteps(
-		timestep TEXT NOT NULL
+	CREATE TABLE IF NOT EXISTS dwd_available_timesteps(
+		timestep TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 
-	CREATE TABLE dwd_available_forecast_variables(
+	CREATE TABLE IF NOT EXISTS dwd_available_forecast_variables(
 		name TEXT NOT NULL
 	);
 
-	CREATE TABLE metadata(
+	CREATE TABLE IF NOT EXISTS metadata(
 		source_url TEXT NOT NULL,
-		processing_time TEXT NOT NULL,
+		processing_time TIMESTAMP WITH TIME ZONE NOT NULL,
 		download_duration REAL NOT NULL,
 		parsing_duration REAL NOT NULL,
 		parser TEXT NOT NULL,
@@ -62,33 +91,26 @@ func (m *MosmixDB) createTables() error {
 		dwd_generating_process TEXT NOT NULL
 	);
 
-	CREATE TABLE forecast_places(
+	CREATE TABLE IF NOT EXISTS forecast_places(
 		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL
+		name TEXT NOT NULL,
+		the_geom geometry(PointZ,4326) NOT NULL
 	);
-	SELECT AddGeometryColumn('forecast_places', 'the_geom', 4326, 'POINTZ', 'XYZ', 1);
-	SELECT CreateSpatialIndex('forecast_places', 'the_geom');
+	ALTER TABLE forecast_places SET UNLOGGED;
 
-	CREATE TABLE forecasts(
+	CREATE TABLE IF NOT EXISTS forecasts(
 		place_id TEXT NOT NULL,
 		name TEXT NOT NULL,
-		timestep TEXT NOT NULL,
+		timestep TIMESTAMP WITH TIME ZONE NOT NULL,
 		value REAL NOT NULL
 	);
-	CREATE INDEX idx_forecasts_place_id_name ON forecasts (place_id, name);
-	CREATE INDEX idx_forecasts_name_timestep_place_id on forecasts(name, timestep, place_id);
+	ALTER TABLE forecasts SET UNLOGGED;
 
-	COMMIT;`
+	SET synchronous_commit TO off;
+
+	COMMIT;
+	`
 	_, err = m.db.Exec(sqlStmt)
-	if err != nil {
-		return err
-	}
-	_, err = m.db.Exec("PRAGMA synchronous=OFF;")
-	if err != nil {
-		return err
-	}
-
-	_, err = m.db.Exec("PRAGMA journal_mode=OFF;")
 	if err != nil {
 		return err
 	}

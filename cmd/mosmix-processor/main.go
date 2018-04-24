@@ -10,7 +10,7 @@ import (
 
 func main() {
 	urlToDownload := flag.String("src", mosmixXML.DefaultMosmixURL, "the url to download")
-	dbPath := flag.String("db", "data.spatialite", "spatialite database file name")
+	dbPath := flag.String("db", "postgresql://mosmix-postgis?sslmode=disable", "postgis db connection string")
 	flag.Parse()
 
 	db, err := mosmixDB.NewMosmixDB(*dbPath)

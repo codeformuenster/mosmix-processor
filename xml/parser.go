@@ -3,6 +3,7 @@ package xml
 import (
 	"bufio"
 	"encoding/xml"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -19,6 +20,7 @@ const DefaultMosmixURL = "https://opendata.dwd.de/weather/local_forecasts/mos/MO
 // DownloadAndParse tries to download and extract the given url into the given
 // db instance
 func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
+	fmt.Print("Downloading .... ")
 	startDownload := time.Now()
 	// create a tmpfile
 	tmpfile, err := ioutil.TempFile("", "mosmix")
@@ -38,13 +40,16 @@ func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
 		ProcessingTime:   startDownload.UTC(),
 		DownloadDuration: time.Now().Sub(startDownload),
 	}
+	fmt.Printf("done in %d ns\n", metadata.DownloadDuration)
 
 	startParsing := time.Now()
+	fmt.Print("Parsing & inserting .... ")
 	err = parseDWDKMLFile(tmpFilename, db, &metadata)
 	if err != nil {
 		return err
 	}
 	metadata.ParsingDuration = time.Now().Sub(startParsing)
+	fmt.Printf("done in %d ns\n", metadata.ParsingDuration)
 	err = db.InsertMetadata(&metadata)
 
 	if err != nil {
@@ -111,7 +116,6 @@ func contains(arr []string, str string) bool {
 }
 
 func parseAndPersistPlacemarkElement(se xml.StartElement, xmlDecoder *xml.Decoder, db *mosmixDB.MosmixDB, metadata *mosmixDB.Metadata) error {
-	// var place Placemark
 	place := mosmixDB.ForecastPlace{}
 	err := xmlDecoder.DecodeElement(&place, &se)
 	if err != nil {
