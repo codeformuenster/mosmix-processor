@@ -13,13 +13,18 @@ type MosmixDB struct {
 }
 
 func NewMosmixDB(connectionString string) (*MosmixDB, error) {
+	fmt.Println("Connecting to database ... ")
 	db, err := sql.Open("postgres", connectionString)
 	if err != nil {
 		return &MosmixDB{}, err
 	}
 
 	m := &MosmixDB{db}
+	fmt.Print("Preparing tables ... ")
+	start := time.Now()
 	err = m.createTables()
+	duration := time.Now().Sub(start)
+	fmt.Printf("done in %s\n", duration)
 	if err != nil {
 		return &MosmixDB{}, err
 	}
@@ -28,14 +33,14 @@ func NewMosmixDB(connectionString string) (*MosmixDB, error) {
 }
 
 func (m *MosmixDB) Close() error {
-	fmt.Print("Creating Indexes ... ")
+	fmt.Print("Creating indexes ... ")
 	start := time.Now()
 	err := m.createIndexes()
 	if err != nil {
 		return err
 	}
 	duration := time.Now().Sub(start)
-	fmt.Printf("done in %d ns\n", duration)
+	fmt.Printf("done in %s\n", duration)
 	return m.db.Close()
 }
 

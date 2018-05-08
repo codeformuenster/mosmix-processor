@@ -20,8 +20,6 @@ func main() {
 	}
 	defer db.Close()
 
-	fmt.Printf("Processing %v into %v\n", *urlToDownload, *dbPath)
-
 	err = mosmixXML.DownloadAndParse(*urlToDownload, db)
 	if err != nil {
 		fmt.Println(err)
