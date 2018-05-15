@@ -10,8 +10,12 @@ import (
 
 func main() {
 	urlToDownload := flag.String("src", mosmixXML.DefaultMosmixURL, "the url to download")
-	dbPath := flag.String("db", "postgresql://mosmix-postgis?sslmode=disable", "postgis db connection string")
+	dbPath := flag.String("db", "", "postgis db connection string")
 	flag.Parse()
+	if *dbPath == "" {
+		fmt.Println("Error: Missing db parameter (postgres connection URI)")
+		return
+	}
 
 	db, err := mosmixDB.NewMosmixDB(*dbPath)
 	if err != nil {
@@ -21,6 +25,12 @@ func main() {
 	defer db.Close()
 
 	err = mosmixXML.DownloadAndParse(*urlToDownload, db)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	err = db.Finalize()
 	if err != nil {
 		fmt.Println(err)
 		return

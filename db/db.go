@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	// import the postgres database driver
 	_ "github.com/lib/pq"
 )
 
@@ -32,7 +33,7 @@ func NewMosmixDB(connectionString string) (*MosmixDB, error) {
 	return m, nil
 }
 
-func (m *MosmixDB) Close() error {
+func (m *MosmixDB) Finalize() error {
 	fmt.Print("Creating indexes ... ")
 	start := time.Now()
 	err := m.createIndexes()
@@ -41,6 +42,11 @@ func (m *MosmixDB) Close() error {
 	}
 	duration := time.Now().Sub(start)
 	fmt.Printf("done in %s\n", duration)
+
+	return nil
+}
+
+func (m *MosmixDB) Close() error {
 	return m.db.Close()
 }
 
@@ -48,17 +54,48 @@ func (m *MosmixDB) createIndexes() error {
 	var err error
 	sqlStmt := `BEGIN;
 
-	ANALYZE forecast_places;
-	ANALYZE forecasts;
+	ANALYZE forecast_places_temp;
+	ANALYZE forecasts_temp;
 
-	CREATE INDEX IF NOT EXISTS idx_the_geom_forecast_places ON forecast_places USING GIST (the_geom);
+	CREATE INDEX IF NOT EXISTS idx_the_geom_forecast_places_temp ON forecast_places_temp USING GIST (the_geom);
+
+	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_name_temp ON forecasts_temp (place_id, name);
+	CREATE INDEX IF NOT EXISTS idx_forecasts_name_timestep_place_id_temp on forecasts_temp (name, timestep, place_id);
+
+	ALTER TABLE IF EXISTS forecast_places RENAME TO forecast_places_old;
+	ALTER TABLE IF EXISTS forecasts RENAME TO forecasts_old;
+	ALTER TABLE IF EXISTS dwd_referenced_models RENAME TO dwd_referenced_models_old;
+	ALTER TABLE IF EXISTS dwd_available_timesteps RENAME TO dwd_available_timesteps_old;
+	ALTER TABLE IF EXISTS dwd_available_forecast_variables RENAME TO dwd_available_forecast_variables_old;
+	ALTER TABLE IF EXISTS metadata RENAME TO metadata_old;
+
+	ALTER TABLE forecast_places_temp RENAME TO forecast_places;
+	ALTER TABLE forecasts_temp RENAME TO forecasts;
+	ALTER TABLE dwd_referenced_models_temp RENAME TO dwd_referenced_models;
+	ALTER TABLE dwd_available_timesteps_temp RENAME TO dwd_available_timesteps;
+	ALTER TABLE dwd_available_forecast_variables_temp RENAME TO dwd_available_forecast_variables;
+	ALTER TABLE metadata_temp RENAME TO metadata;
+
 	CREATE OR REPLACE VIEW places AS SELECT id, name, ST_X(the_geom) AS lng, ST_Y(the_geom) AS lat, ST_Z(the_geom) AS alt, the_geom from forecast_places;
 
-	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_name ON forecasts (place_id, name);
-	CREATE INDEX IF NOT EXISTS idx_forecasts_name_timestep_place_id on forecasts(name, timestep, place_id);
+	COMMIT;`
+	_, err = m.db.Exec(sqlStmt)
+	if err != nil {
+		return err
+	}
 
-	ALTER TABLE forecast_places SET LOGGED;
-	ALTER TABLE forecasts SET LOGGED;
+	err = m.CreateForecastsAllView()
+	if err != nil {
+		return err
+	}
+	sqlStmt = `BEGIN;
+
+	DROP TABLE IF EXISTS forecast_places_old;
+	DROP TABLE IF EXISTS forecasts_old;
+	DROP TABLE IF EXISTS dwd_referenced_models_old;
+	DROP TABLE IF EXISTS dwd_available_timesteps_old;
+	DROP TABLE IF EXISTS dwd_available_forecast_variables_old;
+	DROP TABLE IF EXISTS metadata_old;
 
 	COMMIT;`
 	_, err = m.db.Exec(sqlStmt)
@@ -72,20 +109,34 @@ func (m *MosmixDB) createIndexes() error {
 func (m *MosmixDB) createTables() error {
 	var err error
 	sqlStmt := `BEGIN;
-	CREATE TABLE IF NOT EXISTS dwd_referenced_models(
+
+	DROP TABLE IF EXISTS forecast_places_temp;
+	DROP TABLE IF EXISTS forecasts_temp;
+	DROP TABLE IF EXISTS dwd_referenced_models_temp;
+	DROP TABLE IF EXISTS dwd_available_timesteps_temp;
+	DROP TABLE IF EXISTS dwd_available_forecast_variables_temp;
+	DROP TABLE IF EXISTS metadata_temp;
+	DROP TABLE IF EXISTS forecast_places_old;
+	DROP TABLE IF EXISTS forecasts_old;
+	DROP TABLE IF EXISTS dwd_referenced_models_old;
+	DROP TABLE IF EXISTS dwd_available_timesteps_old;
+	DROP TABLE IF EXISTS dwd_available_forecast_variables_old;
+	DROP TABLE IF EXISTS metadata_old;
+
+	CREATE TABLE dwd_referenced_models_temp(
 		name TEXT NOT NULL,
 		reference_time TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS dwd_available_timesteps(
+	CREATE TABLE dwd_available_timesteps_temp(
 		timestep TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS dwd_available_forecast_variables(
+	CREATE TABLE dwd_available_forecast_variables_temp(
 		name TEXT NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS metadata(
+	CREATE TABLE metadata_temp(
 		source_url TEXT NOT NULL,
 		processing_time TIMESTAMP WITH TIME ZONE NOT NULL,
 		download_duration REAL NOT NULL,
@@ -96,20 +147,20 @@ func (m *MosmixDB) createTables() error {
 		dwd_generating_process TEXT NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS forecast_places(
+	CREATE TABLE forecast_places_temp(
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
 		the_geom geometry(PointZ,4326) NOT NULL
 	);
-	ALTER TABLE forecast_places SET UNLOGGED;
+	ALTER TABLE forecast_places_temp SET UNLOGGED;
 
-	CREATE TABLE IF NOT EXISTS forecasts(
+	CREATE TABLE forecasts_temp(
 		place_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		timestep TIMESTAMP WITH TIME ZONE NOT NULL,
 		value REAL NOT NULL
 	);
-	ALTER TABLE forecasts SET UNLOGGED;
+	ALTER TABLE forecasts_temp SET UNLOGGED;
 
 	SET synchronous_commit TO off;
 

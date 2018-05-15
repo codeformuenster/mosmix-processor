@@ -50,7 +50,7 @@ type ForecastVariableTimestep struct {
 
 // InsertMetadata creates a JSON document in the database under the metadata key
 func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
-	_, err := m.db.Exec(`INSERT INTO metadata(
+	_, err := m.db.Exec(`INSERT INTO metadata_temp (
 		source_url,
 		processing_time,
 		download_duration,
@@ -74,32 +74,52 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 	}
 
 	for _, model := range metadata.ReferencedModels {
-		_, err := m.db.Exec("INSERT INTO dwd_referenced_models(name, reference_time) values($1, $2)", model.Name, model.ReferenceTime)
+		_, err := m.db.Exec("INSERT INTO dwd_referenced_models_temp (name, reference_time) values($1, $2)", model.Name, model.ReferenceTime)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, timestep := range metadata.ForecastTimeSteps {
-		_, err := m.db.Exec("INSERT INTO dwd_available_timesteps(timestep) values($1)", timestep)
+		_, err := m.db.Exec("INSERT INTO dwd_available_timesteps_temp (timestep) values($1)", timestep)
 		if err != nil {
 			return err
 		}
 	}
 
-	var qryBytes bytes.Buffer
-	for i, variable := range metadata.AvailableVariables {
-		_, err := m.db.Exec("INSERT INTO dwd_available_forecast_variables (name) VALUES ($1)", variable)
+	for _, variable := range metadata.AvailableVariables {
+		_, err := m.db.Exec("INSERT INTO dwd_available_forecast_variables_temp (name) VALUES ($1)", variable)
 		if err != nil {
 			return err
 		}
+	}
 
-		if i == 0 {
-			fmt.Fprintf(&qryBytes, "CREATE OR REPLACE VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", variable, variable, variable)
+	return nil
+}
+
+func (m *MosmixDB) CreateForecastsAllView() error {
+	var qryBytes bytes.Buffer
+
+	rows, err := m.db.Query("SELECT name FROM dwd_available_forecast_variables")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	isFirst := true
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if isFirst == true {
+			fmt.Fprintf(&qryBytes, "CREATE OR REPLACE VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", name, name, name)
+			isFirst = false
 			continue
 		}
-
-		fmt.Fprintf(&qryBytes, " LEFT JOIN (SELECT place_id, timestep, value as %s FROM forecasts WHERE name = '%s') AS %s USING (timestep, place_id)", variable, variable, variable)
+		fmt.Fprintf(&qryBytes, " LEFT JOIN (SELECT place_id, timestep, value as %s FROM forecasts WHERE name = '%s') AS %s USING (timestep, place_id)", name, name, name)
+	}
+	if err := rows.Err(); err != nil {
+		return err
 	}
 
 	_, err = m.db.Exec(qryBytes.String())
@@ -109,19 +129,20 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 
 	return nil
 }
+
 func (m *MosmixDB) InsertForecast(forecast *ForecastPlace) error {
 	tx, err := m.db.Begin()
 	if err != nil {
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO forecast_places (id, name, the_geom) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326));",
+	_, err = tx.Exec("INSERT INTO forecast_places_temp (id, name, the_geom) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326));",
 		forecast.ID, forecast.Name, forecast.Geometry.Longitude, forecast.Geometry.Latitude, forecast.Geometry.Altitude)
 	if err != nil {
 		return err
 	}
 
-	stmt, err := tx.Prepare(pq.CopyIn("forecasts", "place_id", "name", "timestep", "value"))
+	stmt, err := tx.Prepare(pq.CopyIn("forecasts_temp", "place_id", "name", "timestep", "value"))
 	if err != nil {
 		log.Fatal(err)
 	}
