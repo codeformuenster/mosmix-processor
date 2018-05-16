@@ -2,18 +2,19 @@ FROM golang:1-alpine as build
 
 ENV IMPORTPATH=github.com/codeformuenster/mosmix-processor
 
-RUN apk --repository http://nl.alpinelinux.org/alpine/edge/testing --no-cache add libspatialite-dev build-base
-
 WORKDIR /go/src/${IMPORTPATH}
 
 COPY . ./
 
-RUN go install ${IMPORTPATH}/cmd/mosmix-processor
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main cmd/mosmix-processor/main.go
+RUN apk --no-cache add ca-certificates
+RUN cp main /mosmix-processor
 
-FROM alpine:3.7
+FROM scratch
 
-RUN apk --repository http://nl.alpinelinux.org/alpine/edge/testing --no-cache add libspatialite-dev ca-certificates
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=build /mosmix-processor /mosmix-processor
 
-COPY --from=build /go/bin/mosmix-processor /usr/bin/
+VOLUME /tmp
 
-CMD ["/usr/bin/mosmix-processor"]
+ENTRYPOINT ["/mosmix-processor"]
