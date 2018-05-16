@@ -3,5 +3,7 @@
 *.csv
 *.md
 .dockerignore
+*.spatialite
 Dockerfile
 NOTES
+vendor
