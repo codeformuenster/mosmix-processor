@@ -100,6 +100,11 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 func (m *MosmixDB) CreateForecastsAllView() error {
 	var qryBytes bytes.Buffer
 
+	_, err := m.db.Exec("DROP VIEW IF EXISTS forecasts_all")
+	if err != nil {
+		return err
+	}
+
 	rows, err := m.db.Query("SELECT name FROM dwd_available_forecast_variables")
 	if err != nil {
 		return err
@@ -112,7 +117,7 @@ func (m *MosmixDB) CreateForecastsAllView() error {
 			return err
 		}
 		if isFirst == true {
-			fmt.Fprintf(&qryBytes, "CREATE OR REPLACE VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", name, name, name)
+			fmt.Fprintf(&qryBytes, "CREATE VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", name, name, name)
 			isFirst = false
 			continue
 		}

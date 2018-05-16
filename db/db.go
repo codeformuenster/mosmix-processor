@@ -76,7 +76,8 @@ func (m *MosmixDB) createIndexes() error {
 	ALTER TABLE dwd_available_forecast_variables_temp RENAME TO dwd_available_forecast_variables;
 	ALTER TABLE metadata_temp RENAME TO metadata;
 
-	CREATE OR REPLACE VIEW places AS SELECT id, name, ST_X(the_geom) AS lng, ST_Y(the_geom) AS lat, ST_Z(the_geom) AS alt, the_geom from forecast_places;
+	DROP VIEW IF EXISTS places;
+	CREATE VIEW places AS SELECT id, name, ST_X(the_geom) AS lng, ST_Y(the_geom) AS lat, ST_Z(the_geom) AS alt, the_geom from forecast_places;
 
 	COMMIT;`
 	_, err = m.db.Exec(sqlStmt)
