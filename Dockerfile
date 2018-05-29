@@ -14,8 +14,7 @@ RUN dep ensure -vendor-only
 
 COPY . ./
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main cmd/mosmix-processor/main.go
-RUN cp main /mosmix-processor
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -tags netgo -ldflags='-s -w -extldflags -static' -o /mosmix-processor cmd/mosmix-processor/main.go
 
 FROM scratch
 
