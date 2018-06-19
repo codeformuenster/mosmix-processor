@@ -100,7 +100,7 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 func (m *MosmixDB) CreateForecastsAllView() error {
 	var qryBytes bytes.Buffer
 
-	_, err := m.db.Exec("DROP VIEW IF EXISTS forecasts_all")
+	_, err := m.db.Exec("DROP MATERIALIZED VIEW IF EXISTS forecasts_all")
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (m *MosmixDB) CreateForecastsAllView() error {
 			return err
 		}
 		if isFirst == true {
-			fmt.Fprintf(&qryBytes, "CREATE VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", name, name, name)
+			fmt.Fprintf(&qryBytes, "CREATE MATERIALIZED VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", name, name, name)
 			isFirst = false
 			continue
 		}
