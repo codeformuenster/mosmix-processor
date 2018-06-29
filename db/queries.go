@@ -4,26 +4,46 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
 )
 
+// for pq inserting
+type StringArray []string
+
+func (s StringArray) String() string {
+	return fmt.Sprintf("ARRAY['%s']", strings.Join(s, "','"))
+}
+
+type ReferencedModels []struct {
+	Name          string    `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd name,attr"`
+	ReferenceTime time.Time `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd referenceTime,attr"`
+}
+
+func (rs ReferencedModels) String() string {
+	var strs []string
+
+	for _, rm := range rs {
+		strs = append(strs, fmt.Sprintf("('%s', '%s')", rm.Name, rm.ReferenceTime.Format(time.RFC3339)))
+	}
+
+	return strings.Join(strs, ",")
+}
+
 type Metadata struct {
-	ForecastTimeSteps []string `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ForecastTimeSteps>TimeStep"`
-	DefaultUndefSign  string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd FormatCfg>DefaultUndefSign"`
-	GeneratingProcess string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd GeneratingProcess"`
-	Issuer            string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd Issuer"`
-	ProductID         string   `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ProductID"`
-	ReferencedModels  []struct {
-		Name          string    `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd name,attr"`
-		ReferenceTime time.Time `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd referenceTime,attr"`
-	} `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ReferencedModel>Model"`
+	ForecastTimeSteps  StringArray      `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ForecastTimeSteps>TimeStep"`
+	DefaultUndefSign   string           `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd FormatCfg>DefaultUndefSign"`
+	GeneratingProcess  string           `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd GeneratingProcess"`
+	Issuer             string           `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd Issuer"`
+	ProductID          string           `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ProductID"`
+	ReferencedModels   ReferencedModels `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd ReferencedModel>Model"`
 	ProcessingTime     time.Time
 	DownloadDuration   time.Duration
 	ParsingDuration    time.Duration
 	SourceURL          string
-	AvailableVariables []string
+	AvailableVariables StringArray
 	// IssueTime is empty?!
 	// IssueTime       *time.Time `xml:"https://opendata.dwd.de/weather/lib/pointforecast_dwd_extension_V1_0.xsd IssueTime,omitempty"`   // ZZmaxLength=0
 }
@@ -48,9 +68,9 @@ type ForecastVariableTimestep struct {
 	Value    string // we rely on casting in sqlite
 }
 
-// InsertMetadata creates a JSON document in the database under the metadata key
 func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
-	_, err := m.db.Exec(`INSERT INTO metadata_temp (
+	// don't do this at home!
+	queryStr := fmt.Sprintf(`INSERT INTO metadata (
 		source_url,
 		processing_time,
 		download_duration,
@@ -58,40 +78,26 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 		parser,
 		dwd_issuer,
 		dwd_product_id,
-		dwd_generating_process
-		) values($1, $2, $3, $4, $5, $6, $7, $8)`,
+		dwd_generating_process,
+		dwd_available_forecast_variables,
+		dwd_available_timesteps,
+		dwd_referenced_models
+		) values('%s', '%s', %d, %d, '%s', '%s', '%s', '%s', %s, %s::timestamp with time zone[], ARRAY[%s]::dwd_referenced_model[])`,
 		metadata.SourceURL,
-		metadata.ProcessingTime,
+		metadata.ProcessingTime.Format(time.RFC3339),
 		metadata.DownloadDuration,
 		metadata.ParsingDuration,
 		"github.com/codeformuenster/mosmix-processor",
-		metadata.Issuer,
 		metadata.ProductID,
+		metadata.Issuer,
 		metadata.GeneratingProcess,
-	)
+		metadata.AvailableVariables,
+		metadata.ForecastTimeSteps,
+		metadata.ReferencedModels)
+	fmt.Println(queryStr)
+	_, err := m.db.Exec(queryStr)
 	if err != nil {
 		return err
-	}
-
-	for _, model := range metadata.ReferencedModels {
-		_, err := m.db.Exec("INSERT INTO dwd_referenced_models_temp (name, reference_time) values($1, $2)", model.Name, model.ReferenceTime)
-		if err != nil {
-			return err
-		}
-	}
-
-	for _, timestep := range metadata.ForecastTimeSteps {
-		_, err := m.db.Exec("INSERT INTO dwd_available_timesteps_temp (timestep) values($1)", timestep)
-		if err != nil {
-			return err
-		}
-	}
-
-	for _, variable := range metadata.AvailableVariables {
-		_, err := m.db.Exec("INSERT INTO dwd_available_forecast_variables_temp (name) VALUES ($1)", variable)
-		if err != nil {
-			return err
-		}
 	}
 
 	return nil
@@ -141,13 +147,13 @@ func (m *MosmixDB) InsertForecast(forecast *ForecastPlace) error {
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO forecast_places_temp (id, name, the_geom) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326));",
+	_, err = tx.Exec("INSERT INTO forecast_places (id, name, the_geom) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326));",
 		forecast.ID, forecast.Name, forecast.Geometry.Longitude, forecast.Geometry.Latitude, forecast.Geometry.Altitude)
 	if err != nil {
 		return err
 	}
 
-	stmt, err := tx.Prepare(pq.CopyIn("forecasts_temp", "place_id", "name", "timestep", "value"))
+	stmt, err := tx.Prepare(pq.CopyIn("forecasts", "place_id", "name", "timestep", "value"))
 	if err != nil {
 		log.Fatal(err)
 	}
