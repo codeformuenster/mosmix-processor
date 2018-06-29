@@ -72,7 +72,7 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 	// don't do this at home!
 	queryStr := fmt.Sprintf(`INSERT INTO metadata (
 		source_url,
-		processing_time,
+		processing_timestamp,
 		download_duration,
 		parsing_duration,
 		parser,
@@ -94,7 +94,6 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 		metadata.AvailableVariables,
 		metadata.ForecastTimeSteps,
 		metadata.ReferencedModels)
-	fmt.Println(queryStr)
 	_, err := m.db.Exec(queryStr)
 	if err != nil {
 		return err
@@ -147,20 +146,20 @@ func (m *MosmixDB) InsertForecast(forecast *ForecastPlace) error {
 		return err
 	}
 
-	_, err = tx.Exec("INSERT INTO forecast_places (id, name, the_geom) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326));",
-		forecast.ID, forecast.Name, forecast.Geometry.Longitude, forecast.Geometry.Latitude, forecast.Geometry.Altitude)
+	_, err = tx.Exec(fmt.Sprintf("INSERT INTO forecast_places_%s (id, name, the_geom, processing_timestamp) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326), $6);", m.RunIdentifier),
+		forecast.ID, forecast.Name, forecast.Geometry.Longitude, forecast.Geometry.Latitude, forecast.Geometry.Altitude, m.ProcessingTimestamp)
 	if err != nil {
 		return err
 	}
 
-	stmt, err := tx.Prepare(pq.CopyIn("forecasts", "place_id", "name", "timestep", "value"))
+	stmt, err := tx.Prepare(pq.CopyIn(fmt.Sprintf("forecasts_%s", m.RunIdentifier), "place_id", "name", "timestep", "value", "processing_timestamp"))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	for _, variable := range forecast.ForecastVariables {
 		for _, value := range variable.Values {
-			_, err := stmt.Exec(forecast.ID, variable.Name, value.Timestep, value.Value)
+			_, err := stmt.Exec(forecast.ID, variable.Name, value.Timestep, value.Value, m.ProcessingTimestamp)
 			if err != nil {
 				return err
 			}

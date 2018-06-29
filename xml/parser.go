@@ -21,7 +21,7 @@ const DefaultMosmixURL = "https://opendata.dwd.de/weather/local_forecasts/mos/MO
 // db instance
 func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
 	fmt.Printf("Downloading & extracting file %v .... ", url)
-	startDownload := time.Now()
+	db.ProcessingTimestamp = time.Now()
 	// create a tmpfile
 	tmpfile, err := ioutil.TempFile("", "mosmix")
 	if err != nil {
@@ -37,8 +37,8 @@ func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
 
 	metadata := mosmixDB.Metadata{
 		SourceURL:        url,
-		ProcessingTime:   startDownload.UTC(),
-		DownloadDuration: time.Now().Sub(startDownload),
+		ProcessingTime:   db.ProcessingTimestamp.UTC(),
+		DownloadDuration: time.Now().Sub(db.ProcessingTimestamp),
 	}
 	fmt.Printf("done in %s\n", metadata.DownloadDuration)
 
