@@ -24,11 +24,10 @@ func NewMosmixDB(connectionString string) (*MosmixDB, error) {
 	fmt.Print("Preparing tables ... ")
 	start := time.Now()
 	err = m.createTables()
-	duration := time.Now().Sub(start)
-	fmt.Printf("done in %s\n", duration)
 	if err != nil {
 		return &MosmixDB{}, err
 	}
+	fmt.Printf("done in %s\n", time.Now().Sub(start))
 
 	return m, nil
 }
@@ -40,8 +39,7 @@ func (m *MosmixDB) Finalize() error {
 	if err != nil {
 		return err
 	}
-	duration := time.Now().Sub(start)
-	fmt.Printf("done in %s\n", duration)
+	fmt.Printf("done in %s\n", time.Now().Sub(start))
 
 	return nil
 }
