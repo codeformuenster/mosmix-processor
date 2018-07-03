@@ -70,7 +70,7 @@ type ForecastVariableTimestep struct {
 
 func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 	// don't do this at home!
-	queryStr := fmt.Sprintf(`INSERT INTO metadata (
+	queryStr := fmt.Sprintf(`INSERT INTO metadata_%s (
 		source_url,
 		processing_timestamp,
 		download_duration,
@@ -83,6 +83,7 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 		dwd_available_timesteps,
 		dwd_referenced_models
 		) values('%s', '%s', %d, %d, '%s', '%s', '%s', '%s', %s, %s::timestamp with time zone[], ARRAY[%s]::dwd_referenced_model[])`,
+		m.runIdentifier,
 		metadata.SourceURL,
 		metadata.ProcessingTime.Format(time.RFC3339),
 		metadata.DownloadDuration,
@@ -98,6 +99,8 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 	if err != nil {
 		return err
 	}
+
+	m.metadata = metadata
 
 	return nil
 }
@@ -146,13 +149,13 @@ func (m *MosmixDB) InsertForecast(forecast *ForecastPlace) error {
 		return err
 	}
 
-	_, err = tx.Exec(fmt.Sprintf("INSERT INTO forecast_places_%s (id, name, the_geom, processing_timestamp) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326), $6);", m.RunIdentifier),
+	_, err = tx.Exec(fmt.Sprintf("INSERT INTO forecast_places_%s (id, name, the_geom, processing_timestamp) VALUES ($1, $2, ST_SetSRID(ST_MakePoint($3, $4, $5), 4326), $6);", m.runIdentifier),
 		forecast.ID, forecast.Name, forecast.Geometry.Longitude, forecast.Geometry.Latitude, forecast.Geometry.Altitude, m.ProcessingTimestamp)
 	if err != nil {
 		return err
 	}
 
-	stmt, err := tx.Prepare(pq.CopyIn(fmt.Sprintf("forecasts_%s", m.RunIdentifier), "place_id", "name", "timestep", "value", "processing_timestamp"))
+	stmt, err := tx.Prepare(pq.CopyIn(fmt.Sprintf("forecasts_%s", m.runIdentifier), "place_id", "name", "timestep", "value", "processing_timestamp"))
 	if err != nil {
 		log.Fatal(err)
 	}

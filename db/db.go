@@ -13,7 +13,8 @@ import (
 type MosmixDB struct {
 	db                  *sql.DB
 	ProcessingTimestamp time.Time
-	RunIdentifier       string
+	runIdentifier       string
+	metadata            *Metadata
 }
 
 func NewMosmixDB(connectionString string) (*MosmixDB, error) {
@@ -23,7 +24,7 @@ func NewMosmixDB(connectionString string) (*MosmixDB, error) {
 		return &MosmixDB{}, err
 	}
 	now := time.Now()
-	m := &MosmixDB{db, now, now.Format("20060102150405")}
+	m := &MosmixDB{db, now, now.Format("20060102150405"), &Metadata{}}
 	fmt.Print("Preparing tables ... ")
 	start := time.Now()
 	err = m.createTables()
@@ -51,24 +52,19 @@ func (m *MosmixDB) Close() error {
 	return m.db.Close()
 }
 
-// SELECT table_name
-//   FROM information_schema.tables
-//  WHERE table_schema='public'
-//    AND table_type='BASE TABLE' and (table_name LIKE 'forecasts_%' or table_name LIKE 'forecast_places_%');
-
-func (m *MosmixDB) createIndexes() error {
+func (m *MosmixDB) buildDropOldTablesQuery() (string, error) {
 	var err error
 	// query the table names to drop..
 	sqlStmt := fmt.Sprintf(`SELECT table_name
 	FROM information_schema.tables
 	WHERE table_schema='public'
 	AND table_type='BASE TABLE'
-	AND (table_name LIKE 'forecasts_%%' OR table_name LIKE 'forecast_places_%%')
-	AND table_name != 'forecasts_%s' AND table_name != 'forecast_places_%s';`,
-		m.RunIdentifier, m.RunIdentifier)
+	AND table_name ~ E'_\\d{14}$'
+	AND table_name !~ '.*_%s$';`,
+		m.runIdentifier)
 	rows, err := m.db.Query(sqlStmt)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer rows.Close()
 
@@ -77,21 +73,72 @@ func (m *MosmixDB) createIndexes() error {
 	for rows.Next() {
 		var tableName string
 		if err := rows.Scan(&tableName); err != nil {
-			return err
+			return "", err
 		}
 		dropStmt.WriteString(" DROP TABLE ")
 		dropStmt.WriteString(tableName)
 		dropStmt.WriteRune(';')
 	}
 
-	sqlStmt = fmt.Sprintf(`BEGIN;
+	return dropStmt.String(), nil
+}
+
+func (m *MosmixDB) buildCrosstabFunctionQuery() (string, error) {
+	// generate the list of forecast variables available
+	var forecastVariables []string
+	for _, fcVar := range m.metadata.AvailableVariables {
+		forecastVariables = append(forecastVariables, fmt.Sprintf("%s REAL", fcVar))
+	}
+	forecastVariablesArgumentsString := strings.Join(forecastVariables, ", ")
+
+	functionSrc := fmt.Sprintf("SELECT * FROM crosstab('SELECT timestep, place_id, name, value FROM forecasts WHERE place_id = ' || quote_literal(place_id) || ' ORDER BY timestep, place_id', 'SELECT DISTINCT(UNNEST(dwd_available_forecast_variables)) FROM metadata') AS ct (timestep TIMESTAMP WITH TIME ZONE, place_id TEXT, %s);", forecastVariablesArgumentsString)
+
+	replaceFunction := false
+	var fnSrcInDB string
+	err := m.db.QueryRow("SELECT prosrc FROM pg_proc WHERE proname = 'forecasts_for_place_id';").Scan(&fnSrcInDB)
+
+	switch {
+	case err == sql.ErrNoRows:
+		// the function does not exist, just create it
+		replaceFunction = true
+	case err != nil:
+		return "", err
+	default:
+		// compare the new function with the one in the database
+		if strings.TrimSpace(functionSrc) != strings.TrimSpace(fnSrcInDB) {
+			fmt.Printf("\nForecasts functions differ!!!\nin DB:\n%s\nnew:\n%s\n",
+				strings.TrimSpace(functionSrc), strings.TrimSpace(fnSrcInDB))
+			replaceFunction = true
+		}
+	}
+
+	if replaceFunction == true {
+		return fmt.Sprintf("DROP FUNCTION IF EXISTS forecasts_for_place_id;"+
+			"CREATE FUNCTION forecasts_for_place_id(place_id TEXT) "+
+			"RETURNS TABLE (timestep TIMESTAMP WITH TIME ZONE, place_id TEXT, %s) AS $$"+
+			"%s "+
+			"$$ LANGUAGE SQL;",
+			forecastVariablesArgumentsString, functionSrc), nil
+	}
+
+	return "", nil
+}
+
+func (m *MosmixDB) createIndexes() error {
+	var err error
+
+	dropStmt, err := m.buildDropOldTablesQuery()
+	if err != nil {
+		return err
+	}
+
+	sqlStmt := fmt.Sprintf(`BEGIN;
 
 	ANALYZE forecast_places_%s;
 	ANALYZE forecasts_%s;
 
 	ALTER TABLE forecast_places_%s ADD CONSTRAINT y%s
 		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
-	--COPY forecast_places_%s FROM 'forecast_places_%s';
 
 	CREATE INDEX IF NOT EXISTS idx_the_geom_forecast_places_%s ON forecast_places_%s USING GIST (the_geom);
 
@@ -99,54 +146,52 @@ func (m *MosmixDB) createIndexes() error {
 
 	ALTER TABLE forecasts_%s ADD CONSTRAINT y%s
 		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
-	--COPY forecasts_%s FROM 'forecasts_%s';
 
 	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_name_%s ON forecasts_%s (place_id, name);
-	CREATE INDEX IF NOT EXISTS idx_forecasts_name_timestep_place_id_%s on forecasts_%s (name, timestep, place_id);
+	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_%s on forecasts_%s (place_id);
 
 	ALTER TABLE forecasts_%s INHERIT forecasts;
+
+	ALTER TABLE metadata_%s ADD CONSTRAINT y%s
+		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
+
+	ALTER TABLE metadata_%s INHERIT metadata;
 
 	%s
 
 	COMMIT;`,
-		m.RunIdentifier,
-		m.RunIdentifier,
-		m.RunIdentifier, m.RunIdentifier,
+		m.runIdentifier,
+		m.runIdentifier,
+		m.runIdentifier, m.runIdentifier,
 		m.ProcessingTimestamp.Add(-1*time.Second).Format(time.RFC3339), m.ProcessingTimestamp.Add(1*time.Second).Format(time.RFC3339),
-		m.RunIdentifier, m.RunIdentifier,
-		m.RunIdentifier, m.RunIdentifier,
-		m.RunIdentifier,
-		m.RunIdentifier, m.RunIdentifier,
+		m.runIdentifier, m.runIdentifier,
+		m.runIdentifier,
+
+		m.runIdentifier, m.runIdentifier,
 		m.ProcessingTimestamp.Add(-1*time.Second).Format(time.RFC3339), m.ProcessingTimestamp.Add(1*time.Second).Format(time.RFC3339),
-		m.RunIdentifier, m.RunIdentifier,
-		m.RunIdentifier, m.RunIdentifier,
-		m.RunIdentifier, m.RunIdentifier,
-		m.RunIdentifier,
-		dropStmt.String(),
+		m.runIdentifier, m.runIdentifier,
+		m.runIdentifier, m.runIdentifier,
+
+		m.runIdentifier,
+		m.runIdentifier, m.runIdentifier,
+		m.ProcessingTimestamp.Add(-1*time.Second).Format(time.RFC3339), m.ProcessingTimestamp.Add(1*time.Second).Format(time.RFC3339),
+		m.runIdentifier,
+		dropStmt,
 	)
 	_, err = m.db.Exec(sqlStmt)
 	if err != nil {
 		return err
 	}
 
-	// err = m.CreateForecastsAllView()
-	// if err != nil {
-	// 	return err
-	// }
-	// sqlStmt = `BEGIN;
-
-	// DROP TABLE IF EXISTS forecast_places_old;
-	// DROP TABLE IF EXISTS forecasts_old;
-	// DROP TABLE IF EXISTS dwd_referenced_models_old;
-	// DROP TABLE IF EXISTS dwd_available_timesteps_old;
-	// DROP TABLE IF EXISTS dwd_available_forecast_variables_old;
-	// DROP TABLE IF EXISTS metadata_old;
-
-	// COMMIT;`
-	// _, err = m.db.Exec(sqlStmt)
-	// if err != nil {
-	// 	return err
-	// }
+	crosstabStmt, err := m.buildCrosstabFunctionQuery()
+	if err != nil {
+		return err
+	}
+	// create the function after metadata partion has been switched..
+	_, err = m.db.Exec(crosstabStmt)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -154,6 +199,8 @@ func (m *MosmixDB) createIndexes() error {
 func (m *MosmixDB) createTables() error {
 	var err error
 	sqlStmt := `BEGIN;
+
+	CREATE EXTENSION IF NOT EXISTS tablefunc;
 
 	DO $$
 	BEGIN
@@ -165,7 +212,7 @@ func (m *MosmixDB) createTables() error {
 		END IF;
 	END$$;
 
-	CREATE TABLE IF NOT EXISTS metadata(
+	CREATE UNLOGGED TABLE IF NOT EXISTS metadata(
 		source_url TEXT NOT NULL,
 		processing_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
 		download_duration REAL NOT NULL,
@@ -179,14 +226,14 @@ func (m *MosmixDB) createTables() error {
 		dwd_referenced_models dwd_referenced_model[] NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS forecast_places(
+	CREATE UNLOGGED TABLE IF NOT EXISTS forecast_places(
 		id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		the_geom geometry(PointZ,4326) NOT NULL,
 		processing_timestamp TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 
-	CREATE TABLE IF NOT EXISTS forecasts(
+	CREATE UNLOGGED TABLE IF NOT EXISTS forecasts(
 		place_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		timestep TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -214,15 +261,15 @@ func (m *MosmixDB) createTables() error {
 
 	sqlStmt = fmt.Sprintf(`BEGIN;
 
-	CREATE TABLE forecast_places_%s
+	CREATE UNLOGGED TABLE forecast_places_%s
 		(LIKE forecast_places INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-	ALTER TABLE forecast_places_%s SET UNLOGGED;
-	CREATE TABLE forecasts_%s
+	CREATE UNLOGGED TABLE forecasts_%s
 		(LIKE forecasts INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-	ALTER TABLE forecasts_%s SET UNLOGGED;
+	CREATE UNLOGGED TABLE metadata_%s
+		(LIKE metadata INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
 
 	COMMIT;
-	`, m.RunIdentifier, m.RunIdentifier, m.RunIdentifier, m.RunIdentifier)
+	`, m.runIdentifier, m.runIdentifier, m.runIdentifier)
 	_, err = m.db.Exec(sqlStmt)
 	if err != nil {
 		return err
