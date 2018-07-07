@@ -15,7 +15,8 @@ import (
 )
 
 // Default Mosmix URL
-const DefaultMosmixURL = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
+const DefaultMosmixSURL = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_S/all_stations/kml/MOSMIX_S_LATEST_240.kmz"
+const DefaultMosmixLURL = "https://opendata.dwd.de/weather/local_forecasts/mos/MOSMIX_L/all_stations/kml/MOSMIX_L_LATEST.kmz"
 
 // DownloadAndParse tries to download and extract the given url into the given
 // db instance

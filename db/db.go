@@ -10,21 +10,25 @@ import (
 	_ "github.com/lib/pq"
 )
 
+const MosmixSSchemaName = "mosmix_s"
+const MosmixLSchemaName = "mosmix_l"
+
 type MosmixDB struct {
 	db                  *sql.DB
 	ProcessingTimestamp time.Time
 	runIdentifier       string
 	metadata            *Metadata
+	schema              string
 }
 
-func NewMosmixDB(connectionString string) (*MosmixDB, error) {
+func NewMosmixDB(connectionString, schema string) (*MosmixDB, error) {
 	fmt.Println("Connecting to database ... ")
 	db, err := sql.Open("postgres", connectionString)
 	if err != nil {
 		return &MosmixDB{}, err
 	}
 	now := time.Now()
-	m := &MosmixDB{db, now, now.Format("20060102150405"), &Metadata{}}
+	m := &MosmixDB{db, now, now.Format("20060102150405"), &Metadata{}, schema}
 	fmt.Print("Preparing tables ... ")
 	start := time.Now()
 	err = m.createTables()
@@ -57,10 +61,11 @@ func (m *MosmixDB) buildDropOldTablesQuery() (string, error) {
 	// query the table names to drop..
 	sqlStmt := fmt.Sprintf(`SELECT table_name
 	FROM information_schema.tables
-	WHERE table_schema='public'
+	WHERE table_schema='%s'
 	AND table_type='BASE TABLE'
 	AND table_name ~ E'_\\d{14}$'
 	AND table_name !~ '.*_%s$';`,
+		m.schema,
 		m.runIdentifier)
 	rows, err := m.db.Query(sqlStmt)
 	if err != nil {
@@ -217,10 +222,8 @@ func (m *MosmixDB) createIndexes() error {
 }
 
 func (m *MosmixDB) createTables() error {
-	var err error
-	sqlStmt := `BEGIN;
-
-	CREATE EXTENSION IF NOT EXISTS tablefunc;
+	// create schema and switch to it
+	_, err := m.db.Exec(fmt.Sprintf(`BEGIN;
 
 	DO $$
 	BEGIN
@@ -231,6 +234,19 @@ func (m *MosmixDB) createTables() error {
 			);
 		END IF;
 	END$$;
+
+	CREATE SCHEMA IF NOT EXISTS %s;
+
+	SET search_path TO %s, public;
+
+	COMMIT`, m.schema, m.schema))
+	if err != nil {
+		return err
+	}
+
+	_, err = m.db.Exec(`BEGIN;
+
+	CREATE EXTENSION IF NOT EXISTS tablefunc;
 
 	CREATE UNLOGGED TABLE IF NOT EXISTS metadata(
 		source_url TEXT NOT NULL,
@@ -271,13 +287,12 @@ func (m *MosmixDB) createTables() error {
 	SET synchronous_commit TO off;
 
 	COMMIT;
-	`
-	_, err = m.db.Exec(sqlStmt)
+	`)
 	if err != nil {
 		return err
 	}
 
-	sqlStmt = fmt.Sprintf(`BEGIN;
+	_, err = m.db.Exec(fmt.Sprintf(`BEGIN;
 
 	CREATE UNLOGGED TABLE forecast_places_%s
 		(LIKE forecast_places INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
@@ -289,8 +304,7 @@ func (m *MosmixDB) createTables() error {
 		(LIKE met_element_definitions INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
 
 	COMMIT;
-	`, m.runIdentifier, m.runIdentifier, m.runIdentifier, m.runIdentifier)
-	_, err = m.db.Exec(sqlStmt)
+	`, m.runIdentifier, m.runIdentifier, m.runIdentifier, m.runIdentifier))
 	if err != nil {
 		return err
 	}
