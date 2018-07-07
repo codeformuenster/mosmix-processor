@@ -87,7 +87,7 @@ func (m *MosmixDB) buildCrosstabFunctionQuery() (string, error) {
 	// generate the list of forecast variables available
 	var forecastVariables []string
 	for _, fcVar := range m.metadata.AvailableVariables {
-		forecastVariables = append(forecastVariables, fmt.Sprintf("%s REAL", fcVar))
+		forecastVariables = append(forecastVariables, fmt.Sprintf("%s NUMERIC(8, 2)", fcVar))
 	}
 	forecastVariablesArgumentsString := strings.Join(forecastVariables, ", ")
 
@@ -237,7 +237,7 @@ func (m *MosmixDB) createTables() error {
 		place_id TEXT NOT NULL,
 		name TEXT NOT NULL,
 		timestep TIMESTAMP WITH TIME ZONE NOT NULL,
-		value REAL NOT NULL,
+		value NUMERIC(8, 2) NOT NULL,
 		processing_timestamp TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 
