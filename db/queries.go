@@ -67,6 +67,12 @@ type ForecastVariableTimestep struct {
 	Value    string // we rely on casting in sqlite
 }
 
+type MetElement struct {
+	ShortName         string `xml:"ShortName"`
+	UnitOfMeasurement string `xml:"UnitOfMeasurement"`
+	Description       string `xml:"Description"`
+}
+
 func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 	// don't do this at home!
 	queryStr := fmt.Sprintf(`INSERT INTO metadata_%s (
@@ -127,6 +133,35 @@ func (m *MosmixDB) InsertForecast(forecast *ForecastPlace) error {
 			if err != nil {
 				return err
 			}
+		}
+	}
+	err = stmt.Close()
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *MosmixDB) InsertMetDefinitions(metDefinitions *[]MetElement) error {
+	tx, err := m.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare(pq.CopyIn(fmt.Sprintf("met_element_definitions_%s", m.runIdentifier), "short_name", "unit_of_measurement", "description", "processing_timestamp"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, metElement := range *metDefinitions {
+		_, err := stmt.Exec(metElement.ShortName, metElement.UnitOfMeasurement, metElement.Description, m.ProcessingTimestamp)
+		if err != nil {
+			return err
 		}
 	}
 	err = stmt.Close()

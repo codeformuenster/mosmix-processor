@@ -132,6 +132,9 @@ func (m *MosmixDB) createIndexes() error {
 		return err
 	}
 
+	constraintFrom := m.ProcessingTimestamp.Add(-1 * time.Second).Format(time.RFC3339)
+	constraintTo := m.ProcessingTimestamp.Add(1 * time.Second).Format(time.RFC3339)
+
 	sqlStmt := fmt.Sprintf(`BEGIN;
 
 	ANALYZE forecast_places_%s;
@@ -157,25 +160,42 @@ func (m *MosmixDB) createIndexes() error {
 
 	ALTER TABLE metadata_%s INHERIT metadata;
 
+	ALTER TABLE met_element_definitions_%s ADD CONSTRAINT y%s
+		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
+
+	ALTER TABLE met_element_definitions_%s INHERIT met_element_definitions;
+
 	%s
 
 	COMMIT;`,
 		m.runIdentifier,
 		m.runIdentifier,
-		m.runIdentifier, m.runIdentifier,
-		m.ProcessingTimestamp.Add(-1*time.Second).Format(time.RFC3339), m.ProcessingTimestamp.Add(1*time.Second).Format(time.RFC3339),
-		m.runIdentifier, m.runIdentifier,
-		m.runIdentifier,
 
 		m.runIdentifier, m.runIdentifier,
-		m.ProcessingTimestamp.Add(-1*time.Second).Format(time.RFC3339), m.ProcessingTimestamp.Add(1*time.Second).Format(time.RFC3339),
-		m.runIdentifier, m.runIdentifier,
+		constraintFrom, constraintTo,
+
 		m.runIdentifier, m.runIdentifier,
 
 		m.runIdentifier,
+
 		m.runIdentifier, m.runIdentifier,
-		m.ProcessingTimestamp.Add(-1*time.Second).Format(time.RFC3339), m.ProcessingTimestamp.Add(1*time.Second).Format(time.RFC3339),
+		constraintFrom, constraintTo,
+
+		m.runIdentifier, m.runIdentifier,
+		m.runIdentifier, m.runIdentifier,
+
 		m.runIdentifier,
+
+		m.runIdentifier, m.runIdentifier,
+		constraintFrom, constraintTo,
+
+		m.runIdentifier,
+
+		m.runIdentifier, m.runIdentifier,
+		constraintFrom, constraintTo,
+
+		m.runIdentifier,
+
 		dropStmt,
 	)
 	_, err = m.db.Exec(sqlStmt)
@@ -241,16 +261,14 @@ func (m *MosmixDB) createTables() error {
 		processing_timestamp TIMESTAMP WITH TIME ZONE NOT NULL
 	);
 
+	CREATE UNLOGGED TABLE IF NOT EXISTS met_element_definitions(
+		description TEXT NOT NULL,
+		unit_of_measurement TEXT NOT NULL,
+		short_name TEXT NOT NULL,
+		processing_timestamp TIMESTAMP WITH TIME ZONE NOT NULL
+	);
+
 	SET synchronous_commit TO off;
-
-	DO $$
-	BEGIN
-		IF NOT EXISTS (SELECT FROM pg_views WHERE viewname = 'places') THEN
-			CREATE VIEW places AS
-				SELECT id, name, ST_X(the_geom) AS lng, ST_Y(the_geom) AS lat, ST_Z(the_geom) AS alt, the_geom from forecast_places;
-		END IF;
-	END$$;
-
 
 	COMMIT;
 	`
@@ -267,9 +285,11 @@ func (m *MosmixDB) createTables() error {
 		(LIKE forecasts INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
 	CREATE UNLOGGED TABLE metadata_%s
 		(LIKE metadata INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+	CREATE UNLOGGED TABLE met_element_definitions_%s
+		(LIKE met_element_definitions INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
 
 	COMMIT;
-	`, m.runIdentifier, m.runIdentifier, m.runIdentifier)
+	`, m.runIdentifier, m.runIdentifier, m.runIdentifier, m.runIdentifier)
 	_, err = m.db.Exec(sqlStmt)
 	if err != nil {
 		return err

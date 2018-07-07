@@ -42,6 +42,14 @@ func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
 	}
 	fmt.Printf("done in %s\n", metadata.DownloadDuration)
 
+	startParsingMetDefs := time.Now()
+	fmt.Printf("Downloading & parsing element definitions from %v .... ", metElementDefinitionURL)
+	err = downloadAndParseDefinitions(db)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("done in %s\n", time.Now().Sub(startParsingMetDefs))
+
 	startParsing := time.Now()
 	fmt.Print("Parsing & inserting .... ")
 	err = parseDWDKMLFile(tmpFilename, db, &metadata)
@@ -50,8 +58,8 @@ func DownloadAndParse(url string, db *mosmixDB.MosmixDB) error {
 	}
 	metadata.ParsingDuration = time.Now().Sub(startParsing)
 	fmt.Printf("done in %s\n", metadata.ParsingDuration)
-	err = db.InsertMetadata(&metadata)
 
+	err = db.InsertMetadata(&metadata)
 	if err != nil {
 		return err
 	}
