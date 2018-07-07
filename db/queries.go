@@ -1,7 +1,6 @@
 package db
 
 import (
-	"bytes"
 	"fmt"
 	"log"
 	"strings"
@@ -101,44 +100,6 @@ func (m *MosmixDB) InsertMetadata(metadata *Metadata) error {
 	}
 
 	m.metadata = metadata
-
-	return nil
-}
-
-func (m *MosmixDB) CreateForecastsAllView() error {
-	var qryBytes bytes.Buffer
-
-	_, err := m.db.Exec("DROP MATERIALIZED VIEW IF EXISTS forecasts_all")
-	if err != nil {
-		return err
-	}
-
-	rows, err := m.db.Query("SELECT name FROM dwd_available_forecast_variables")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	isFirst := true
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return err
-		}
-		if isFirst == true {
-			fmt.Fprintf(&qryBytes, "CREATE MATERIALIZED VIEW forecasts_all AS SELECT * FROM (SELECT place_id, timestep, value AS %s FROM forecasts WHERE name = '%s') AS %s", name, name, name)
-			isFirst = false
-			continue
-		}
-		fmt.Fprintf(&qryBytes, " LEFT JOIN (SELECT place_id, timestep, value as %s FROM forecasts WHERE name = '%s') AS %s USING (timestep, place_id)", name, name, name)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	_, err = m.db.Exec(qryBytes.String())
-	if err != nil {
-		return err
-	}
 
 	return nil
 }
