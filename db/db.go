@@ -135,7 +135,7 @@ func (m *MosmixDB) buildCrosstabFunctionQuery() (string, error) {
 			"CREATE FUNCTION forecasts_for_place_id(place_id TEXT) "+
 			"RETURNS TABLE (timestep TIMESTAMP WITH TIME ZONE, place_id TEXT, %s) AS $$"+
 			"%s "+
-			"$$ LANGUAGE SQL;",
+			"$$ LANGUAGE SQL STABLE LEAKPROOF PARALLEL SAFE STRICT ROWS 240;",
 			forecastVariablesArgumentsString, functionSrc), nil
 	}
 
