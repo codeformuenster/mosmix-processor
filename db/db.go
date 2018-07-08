@@ -112,7 +112,7 @@ func (m *MosmixDB) buildCrosstabFunctionQuery() (string, error) {
 		// compare the new function with the one in the database
 		if strings.TrimSpace(functionSrc) != strings.TrimSpace(fnSrcInDB) {
 			fmt.Printf("\nForecasts functions differ!!!\nin DB:\n%s\nnew:\n%s\n",
-				strings.TrimSpace(functionSrc), strings.TrimSpace(fnSrcInDB))
+				strings.TrimSpace(fnSrcInDB), strings.TrimSpace(functionSrc))
 			replaceFunction = true
 		}
 	}
@@ -142,66 +142,38 @@ func (m *MosmixDB) createIndexes() error {
 
 	sqlStmt := fmt.Sprintf(`BEGIN;
 
-	ANALYZE forecast_places_%s;
-	ANALYZE forecasts_%s;
+	ANALYZE forecast_places_%[1]s;
+	ANALYZE forecasts_%[1]s;
 
-	ALTER TABLE forecast_places_%s ADD CONSTRAINT y%s
-		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
+	ALTER TABLE forecast_places_%[1]s ADD CONSTRAINT y%[1]s
+		CHECK ( processing_timestamp >= '%[2]s' AND processing_timestamp < '%[3]s' );
 
-	CREATE INDEX IF NOT EXISTS idx_the_geom_forecast_places_%s ON forecast_places_%s USING GIST (the_geom);
+	CREATE INDEX IF NOT EXISTS idx_the_geom_forecast_places_%[1]s ON forecast_places_%[1]s USING GIST (the_geom);
 
-	ALTER TABLE forecast_places_%s INHERIT forecast_places;
+	ALTER TABLE forecast_places_%[1]s INHERIT forecast_places;
 
-	ALTER TABLE forecasts_%s ADD CONSTRAINT y%s
-		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
+	ALTER TABLE forecasts_%[1]s ADD CONSTRAINT y%[1]s
+		CHECK ( processing_timestamp >= '%[2]s' AND processing_timestamp < '%[3]s' );
 
-	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_name_%s ON forecasts_%s (place_id, name);
-	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_%s on forecasts_%s (place_id);
+	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_name_%[1]s ON forecasts_%[1]s (place_id, name);
+	CREATE INDEX IF NOT EXISTS idx_forecasts_place_id_%[1]s on forecasts_%[1]s (place_id);
 
-	ALTER TABLE forecasts_%s INHERIT forecasts;
+	ALTER TABLE forecasts_%[1]s INHERIT forecasts;
 
-	ALTER TABLE metadata_%s ADD CONSTRAINT y%s
-		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
+	ALTER TABLE metadata_%[1]s ADD CONSTRAINT y%[1]s
+		CHECK ( processing_timestamp >= '%[2]s' AND processing_timestamp < '%[3]s' );
 
-	ALTER TABLE metadata_%s INHERIT metadata;
+	ALTER TABLE metadata_%[1]s INHERIT metadata;
 
-	ALTER TABLE met_element_definitions_%s ADD CONSTRAINT y%s
-		CHECK ( processing_timestamp >= '%s' AND processing_timestamp < '%s' );
+	ALTER TABLE met_element_definitions_%[1]s ADD CONSTRAINT y%[1]s
+		CHECK ( processing_timestamp >= '%[2]s' AND processing_timestamp < '%[3]s' );
 
-	ALTER TABLE met_element_definitions_%s INHERIT met_element_definitions;
+	ALTER TABLE met_element_definitions_%[1]s INHERIT met_element_definitions;
 
-	%s
+	%[4]s
 
 	COMMIT;`,
-		m.runIdentifier,
-		m.runIdentifier,
-
-		m.runIdentifier, m.runIdentifier,
-		constraintFrom, constraintTo,
-
-		m.runIdentifier, m.runIdentifier,
-
-		m.runIdentifier,
-
-		m.runIdentifier, m.runIdentifier,
-		constraintFrom, constraintTo,
-
-		m.runIdentifier, m.runIdentifier,
-		m.runIdentifier, m.runIdentifier,
-
-		m.runIdentifier,
-
-		m.runIdentifier, m.runIdentifier,
-		constraintFrom, constraintTo,
-
-		m.runIdentifier,
-
-		m.runIdentifier, m.runIdentifier,
-		constraintFrom, constraintTo,
-
-		m.runIdentifier,
-
-		dropStmt,
+		m.runIdentifier, constraintFrom, constraintTo, dropStmt,
 	)
 	_, err = m.db.Exec(sqlStmt)
 	if err != nil {
@@ -235,18 +207,18 @@ func (m *MosmixDB) createTables() error {
 		END IF;
 	END$$;
 
-	CREATE SCHEMA IF NOT EXISTS %s;
+	CREATE EXTENSION IF NOT EXISTS tablefunc;
 
-	SET search_path TO %s, public;
+	CREATE SCHEMA IF NOT EXISTS %[1]s;
 
-	COMMIT`, m.schema, m.schema))
+	SET search_path TO %[1]s, public;
+
+	COMMIT`, m.schema))
 	if err != nil {
 		return err
 	}
 
 	_, err = m.db.Exec(`BEGIN;
-
-	CREATE EXTENSION IF NOT EXISTS tablefunc;
 
 	CREATE UNLOGGED TABLE IF NOT EXISTS metadata(
 		source_url TEXT NOT NULL,
@@ -294,17 +266,17 @@ func (m *MosmixDB) createTables() error {
 
 	_, err = m.db.Exec(fmt.Sprintf(`BEGIN;
 
-	CREATE UNLOGGED TABLE forecast_places_%s
+	CREATE UNLOGGED TABLE forecast_places_%[1]s
 		(LIKE forecast_places INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-	CREATE UNLOGGED TABLE forecasts_%s
+	CREATE UNLOGGED TABLE forecasts_%[1]s
 		(LIKE forecasts INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-	CREATE UNLOGGED TABLE metadata_%s
+	CREATE UNLOGGED TABLE metadata_%[1]s
 		(LIKE metadata INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
-	CREATE UNLOGGED TABLE met_element_definitions_%s
+	CREATE UNLOGGED TABLE met_element_definitions_%[1]s
 		(LIKE met_element_definitions INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
 
 	COMMIT;
-	`, m.runIdentifier, m.runIdentifier, m.runIdentifier, m.runIdentifier))
+	`, m.runIdentifier))
 	if err != nil {
 		return err
 	}
