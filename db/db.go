@@ -96,11 +96,24 @@ func (m *MosmixDB) buildCrosstabFunctionQuery() (string, error) {
 	}
 	forecastVariablesArgumentsString := strings.Join(forecastVariables, ", ")
 
-	functionSrc := fmt.Sprintf("SELECT * FROM crosstab('SELECT timestep, place_id, name, value FROM forecasts WHERE place_id = ' || quote_literal(place_id) || ' ORDER BY timestep, place_id', 'SELECT DISTINCT(UNNEST(dwd_available_forecast_variables)) FROM metadata') AS ct (timestep TIMESTAMP WITH TIME ZONE, place_id TEXT, %s);", forecastVariablesArgumentsString)
+	functionSrc := fmt.Sprintf("SELECT * FROM crosstab("+
+		"'SELECT timestep, place_id, name, value FROM %[1]s.forecasts "+
+		"WHERE place_id = ' || quote_literal(place_id) || ' "+
+		"ORDER BY timestep, place_id', "+
+		"'SELECT DISTINCT(UNNEST(dwd_available_forecast_variables)) FROM %[1]s.metadata') "+
+		"AS ct (timestep TIMESTAMP WITH TIME ZONE, place_id TEXT, %[2]s);",
+		m.schema, forecastVariablesArgumentsString)
 
 	replaceFunction := false
 	var fnSrcInDB string
-	err := m.db.QueryRow("SELECT prosrc FROM pg_proc WHERE proname = 'forecasts_for_place_id';").Scan(&fnSrcInDB)
+	err := m.db.QueryRow(
+		fmt.Sprintf(`SELECT p.prosrc FROM pg_catalog.pg_proc p
+		LEFT JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+		WHERE p.proname = 'forecasts_for_place_id'
+		AND n.nspname OPERATOR(pg_catalog.~) '^(%s)$';`,
+			m.schema,
+		),
+	).Scan(&fnSrcInDB)
 
 	switch {
 	case err == sql.ErrNoRows:
