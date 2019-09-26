@@ -4,13 +4,7 @@ ENV IMPORTPATH=github.com/codeformuenster/mosmix-processor
 
 WORKDIR /go/src/${IMPORTPATH}
 
-RUN apk --no-cache add ca-certificates curl git && \
-  curl -fsSL -o /usr/local/bin/dep https://github.com/golang/dep/releases/download/v0.4.1/dep-linux-amd64 && \
-  chmod +x /usr/local/bin/dep
-
 COPY . ./
-
-RUN dep ensure -vendor-only
 
 ENV CGO_ENABLED=0 GOOS=linux
 
